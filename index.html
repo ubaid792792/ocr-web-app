@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI OCR - Pro Document Scanner</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .drop-zone--over {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+        }
+        #result-container table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1rem 0;
+        }
+        #result-container th, #result-container td {
+            border: 1px solid #e5e7eb;
+            padding: 0.5rem;
+            text-align: left;
+        }
+        #result-container th {
+            background-color: #f9fafb;
+        }
+        #result-container ul {
+            list-style-type: disc;
+            margin-left: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        #result-container p {
+            margin-bottom: 1rem;
+        }
+        .loader {
+            border-top-color: #3b82f6;
+            animation: spinner 1.5s linear infinite;
+        }
+        @keyframes spinner {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans text-gray-900">
+
+    <div class="max-w-6xl mx-auto px-4 py-8">
+        <!-- Header -->
+        <header class="text-center mb-10">
+            <h1 class="text-4xl font-extrabold text-blue-600 mb-2">AI OCR Pro</h1>
+            <p class="text-gray-600">Extract text, tables, and lists from Images and PDFs with layout preservation.</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            <!-- Left Column: Upload & Controls -->
+            <div class="lg:col-span-4 space-y-6">
+                <!-- Drop Zone -->
+                <div id="drop-zone" class="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center bg-white hover:border-blue-400 transition-colors cursor-pointer group relative">
+                    <input type="file" id="file-input" class="hidden" accept="image/*,.pdf" multiple>
+                    <div class="space-y-4">
+                        <div class="text-5xl text-gray-400 group-hover:text-blue-500 transition-colors">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                        </div>
+                        <div>
+                            <p class="text-lg font-semibold">Drop files here</p>
+                            <p class="text-sm text-gray-500">or click to browse (Images, PDF)</p>
+                        </div>
+                        <div class="flex justify-center">
+                            <button id="btn-paste" class="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-100 transition-all font-medium text-sm">
+                                <i class="fas fa-paste"></i>
+                                <span>Paste from Clipboard</span>
+                            </button>
+                        </div>
+                        <p class="text-xs text-gray-400">Pasting from clipboard also works via Ctrl+V!</p>
+                    </div>
+                </div>
+
+                <!-- File Queue -->
+                <div id="queue-card" class="bg-white rounded-xl p-6 shadow-sm hidden">
+                    <div class="flex justify-between items-center mb-4 border-b pb-2">
+                        <h3 class="font-bold text-gray-700">File Queue (<span id="queue-count">0</span>)</h3>
+                        <button id="btn-clear-queue" class="text-xs text-red-500 hover:text-red-700 font-semibold uppercase tracking-wider">Clear All</button>
+                    </div>
+                    <div id="file-queue-list" class="space-y-2 max-h-48 overflow-y-auto mb-4 scrollbar-thin scrollbar-thumb-gray-200">
+                        <!-- Queue items -->
+                    </div>
+                    <button id="btn-start-ocr" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transition-all transform active:scale-95 flex items-center justify-center gap-2">
+                        <i class="fas fa-play text-sm"></i>
+                        <span>Start OCR Processing</span>
+                    </button>
+                </div>
+
+                <!-- Status & Progress -->
+                <div id="status-card" class="bg-white rounded-xl p-6 shadow-sm hidden">
+                    <h3 class="font-bold mb-4 flex items-center">
+                        <span id="status-icon" class="mr-2"></span>
+                        <span id="status-text">Processing...</span>
+                    </h3>
+                    <div class="w-full bg-gray-200 rounded-full h-2.5 mb-2">
+                        <div id="progress-bar" class="bg-blue-600 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                    <p id="progress-detail" class="text-xs text-gray-500">Initializing engine...</p>
+                </div>
+
+                <!-- Configuration -->
+                <div class="bg-white rounded-xl p-6 shadow-sm">
+                    <h3 class="font-bold mb-4">Settings</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">OCR Language</label>
+                            <select id="lang-select" class="w-full border-gray-300 rounded-lg shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border">
+                                <option value="eng">English</option>
+                                <option value="fra">French</option>
+                                <option value="deu">German</option>
+                                <option value="spa">Spanish</option>
+                                <option value="chi_sim">Chinese (Simplified)</option>
+                                <option value="hin">Hindi</option>
+                            </select>
+                        </div>
+                        <div class="flex items-center">
+                            <input type="checkbox" id="detect-tables" checked class="h-4 w-4 text-blue-600 border-gray-300 rounded">
+                            <label for="detect-tables" class="ml-2 block text-sm text-gray-700">Attempt Table Detection</label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Results -->
+            <div class="lg:col-span-8 space-y-6">
+                <div class="bg-white rounded-xl shadow-md overflow-hidden flex flex-col h-[700px]">
+                    <!-- Toolbar -->
+                    <div class="bg-gray-50 px-6 py-3 border-b flex justify-between items-center">
+                        <div class="flex space-x-2">
+                            <button id="btn-formatted" class="px-4 py-1.5 rounded-md bg-blue-600 text-white text-sm font-medium shadow-sm">Formatted</button>
+                            <button id="btn-raw" class="px-4 py-1.5 rounded-md bg-white border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-100">Raw Text</button>
+                        </div>
+                        <div class="flex space-x-2">
+                            <button id="copy-btn" class="p-2 text-gray-600 hover:text-blue-600 transition-colors" title="Copy to clipboard">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                            <button id="download-txt" class="p-2 text-gray-600 hover:text-blue-600 transition-colors" title="Download as .txt">
+                                <i class="fas fa-file-alt"></i>
+                            </button>
+                            <button id="download-html" class="p-2 text-gray-600 hover:text-blue-600 transition-colors" title="Download as .html">
+                                <i class="fas fa-file-code"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Content Area -->
+                    <div id="result-view" class="flex-1 overflow-y-auto p-8 prose max-w-none">
+                        <div id="placeholder" class="h-full flex flex-col items-center justify-center text-gray-400">
+                            <i class="fas fa-file-invoice text-6xl mb-4 opacity-20"></i>
+                            <p>No content processed yet.</p>
+                            <p class="text-sm">Upload a file or paste an image to begin.</p>
+                        </div>
+                        <div id="result-container" class="hidden"></div>
+                        <textarea id="raw-container" class="hidden w-full h-full p-0 border-none focus:ring-0 text-sm font-mono resize-none" readonly></textarea>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Setup PDF.js
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const statusCard = document.getElementById('status-card');
+        const progressBar = document.getElementById('progress-bar');
+        const progressDetail = document.getElementById('progress-detail');
+        const statusText = document.getElementById('status-text');
+        const statusIcon = document.getElementById('status-icon');
+        const resultContainer = document.getElementById('result-container');
+        const rawContainer = document.getElementById('raw-container');
+        const placeholder = document.getElementById('placeholder');
+        const langSelect = document.getElementById('lang-select');
+        const detectTablesCheck = document.getElementById('detect-tables');
+        const queueCard = document.getElementById('queue-card');
+        const fileQueueList = document.getElementById('file-queue-list');
+        const queueCount = document.getElementById('queue-count');
+        const btnStartOcr = document.getElementById('btn-start-ocr');
+        const btnClearQueue = document.getElementById('btn-clear-queue');
+        const btnPaste = document.getElementById('btn-paste');
+
+        // State
+        let isProcessing = false;
+        let currentMode = 'formatted'; // 'formatted' or 'raw'
+        let fileQueue = [];
+
+        // Initialize Tesseract Worker
+        let worker = null;
+
+        async function getWorker() {
+            if (worker) return worker;
+            worker = await Tesseract.createWorker(langSelect.value, 1, {
+                logger: m => {
+                    if (m.status === 'recognizing text') {
+                        updateProgress(null, `Recognizing: ${Math.round(m.progress * 100)}%`);
+                    }
+                }
+            });
+            return worker;
+        }
+
+        function updateProgress(percent, detail) {
+            if (percent !== null) progressBar.style.width = `${percent}%`;
+            if (detail) progressDetail.textContent = detail;
+        }
+
+        function showStatus(text, iconClass = 'loader') {
+            statusCard.classList.remove('hidden');
+            statusText.textContent = text;
+            statusIcon.innerHTML = iconClass === 'loader' 
+                ? '<div class="loader ease-linear rounded-full border-2 border-t-2 border-gray-200 h-4 w-4"></div>'
+                : `<i class="${iconClass}"></i>`;
+        }
+
+        // --- Queue Management ---
+
+        function addToQueue(files) {
+            for (let file of files) {
+                // Generate simple ID
+                const id = Math.random().toString(36).substr(2, 9);
+                fileQueue.push({ id, file });
+            }
+            renderQueue();
+        }
+
+        function removeFromQueue(id) {
+            fileQueue = fileQueue.filter(item => item.id !== id);
+            renderQueue();
+        }
+
+        function renderQueue() {
+            fileQueueList.innerHTML = '';
+            queueCount.textContent = fileQueue.length;
+
+            if (fileQueue.length > 0) {
+                queueCard.classList.remove('hidden');
+                fileQueue.forEach(item => {
+                    const div = document.createElement('div');
+                    div.className = 'flex items-center justify-between p-2 bg-gray-50 rounded border border-gray-100 hover:border-blue-200 transition-all';
+                    div.innerHTML = `
+                        <div class="flex items-center gap-2 overflow-hidden">
+                            <i class="${item.file.type.includes('pdf') ? 'fas fa-file-pdf text-red-500' : 'fas fa-file-image text-blue-500'}"></i>
+                            <span class="truncate font-medium text-xs text-gray-700">${item.file.name}</span>
+                            <span class="text-[10px] text-gray-400">(${(item.file.size / 1024 / 1024).toFixed(2)} MB)</span>
+                        </div>
+                        <button class="text-gray-400 hover:text-red-500 transition-colors p-1" onclick="removeFromQueue('${item.id}')">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    `;
+                    fileQueueList.appendChild(div);
+                });
+            } else {
+                queueCard.classList.add('hidden');
+            }
+        }
+
+        btnClearQueue.addEventListener('click', () => {
+            fileQueue = [];
+            renderQueue();
+        });
+
+        // --- Paste Logic ---
+
+        btnPaste.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            try {
+                const items = await navigator.clipboard.read();
+                const files = [];
+                for (let item of items) {
+                    for (let type of item.types) {
+                        if (type.startsWith('image/')) {
+                            const blob = await item.getType(type);
+                            const file = new File([blob], `pasted-image-${Date.now()}.${type.split('/')[1]}`, { type });
+                            files.push(file);
+                        }
+                    }
+                }
+                if (files.length > 0) {
+                    addToQueue(files);
+                } else {
+                    alert("No image found in clipboard. Use 'Print Screen' or right-click 'Copy Image' first.");
+                }
+            } catch (err) {
+                console.error("Clipboard access denied or failed: ", err);
+                alert("Please grant clipboard permission or use Ctrl+V.");
+            }
+        });
+
+        // --- File Handling ---
+
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drop-zone--over');
+        });
+
+        ['dragleave', 'dragend'].forEach(type => {
+            dropZone.addEventListener(type, () => {
+                dropZone.classList.remove('drop-zone--over');
+            });
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drop-zone--over');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) addToQueue(files);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                addToQueue(e.target.files);
+                fileInput.value = ''; // Reset for next selection
+            }
+        });
+
+        window.addEventListener('paste', (e) => {
+            const items = e.clipboardData.items;
+            const files = [];
+            for (let i = 0; i < items.length; i++) {
+                if (items[i].type.indexOf('image') !== -1) {
+                    files.push(items[i].getAsFile());
+                }
+            }
+            if (files.length > 0) addToQueue(files);
+        });
+
+        btnStartOcr.addEventListener('click', startProcessing);
+
+        async function startProcessing() {
+            if (isProcessing || fileQueue.length === 0) return;
+            isProcessing = true;
+            
+            placeholder.classList.add('hidden');
+            resultContainer.innerHTML = '';
+            rawContainer.value = '';
+            showStatus('Processing...', 'loader');
+            updateProgress(0, 'Initialising engine...');
+
+            try {
+                const worker = await getWorker();
+                const totalFiles = fileQueue.length;
+                
+                for (let i = 0; i < totalFiles; i++) {
+                    const item = fileQueue[i];
+                    const file = item.file;
+                    const overallPercent = (i / totalFiles) * 100;
+                    
+                    updateProgress(overallPercent, `File ${i+1}/${totalFiles}: ${file.name}`);
+                    
+                    if (file.type === 'application/pdf') {
+                        await processPDF(file, worker);
+                    } else {
+                        await processImage(file, worker);
+                    }
+                }
+
+                showStatus('Complete!', 'fas fa-check-circle text-green-500');
+                updateProgress(100, `Successfully processed ${totalFiles} files.`);
+                switchMode(currentMode);
+                fileQueue = []; // Clear queue after success
+                renderQueue();
+            } catch (error) {
+                console.error(error);
+                showStatus('Error processing', 'fas fa-exclamation-circle text-red-500');
+                progressDetail.textContent = error.message;
+            } finally {
+                isProcessing = false;
+            }
+        }
+
+        async function processImage(file, worker) {
+            const result = await worker.recognize(file);
+            renderResult(result.data);
+        }
+
+        async function processPDF(file, worker) {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            
+            for (let i = 1; i <= pdf.numPages; i++) {
+                updateProgress((i / pdf.numPages) * 100, `Processing PDF page ${i} of ${pdf.numPages}...`);
+                const page = await pdf.getPage(i);
+                const viewport = page.getViewport({ scale: 2.0 }); // High scale for better OCR
+                
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+                
+                await page.render({ canvasContext: context, viewport: viewport }).promise;
+                
+                const result = await worker.recognize(canvas);
+                renderResult(result.data, `Page ${i}`);
+            }
+        }
+
+        // --- Formatting Engine ---
+
+        function renderResult(data, title = null) {
+            const container = document.createElement('div');
+            container.className = 'mb-12 border-b pb-8 last:border-0';
+            
+            if (title) {
+                const header = document.createElement('h2');
+                header.className = 'text-xl font-bold mb-4 text-gray-800';
+                header.textContent = title;
+                container.appendChild(header);
+            }
+
+            // Raw text accumulation
+            rawContainer.value += (title ? `--- ${title} ---\n` : '') + data.text + '\n\n';
+
+            // Smart Formatting Logic
+            const blocks = data.blocks;
+            blocks.forEach(block => {
+                if (detectTablesCheck.checked && isLikelyTable(block)) {
+                    container.appendChild(formatAsTable(block));
+                } else {
+                    block.paragraphs.forEach(para => {
+                        const firstLine = para.lines[0].text.trim();
+                        // Simple list detection (bullets or numbers)
+                        if (/^[\u2022\u00b7\*\-]\s|^\d+[\.\)]\s/.test(firstLine)) {
+                            container.appendChild(formatAsList(para));
+                        } else {
+                            const p = document.createElement('p');
+                            p.textContent = para.text.trim();
+                            container.appendChild(p);
+                        }
+                    });
+                }
+            });
+
+            resultContainer.appendChild(container);
+            resultContainer.classList.remove('hidden');
+        }
+
+        function isLikelyTable(block) {
+            // Heuristic: If block has many lines and lines have significant gaps between words
+            // that align vertically, it might be a table.
+            if (block.paragraphs.length < 1) return false;
+            
+            let lineWithMultipleGaps = 0;
+            const lines = block.paragraphs.flatMap(p => p.lines);
+            
+            if (lines.length < 2) return false;
+
+            lines.forEach(line => {
+                // If a line has more than 2 words and large spaces between them
+                if (line.words.length >= 3) {
+                    let largeGaps = 0;
+                    for (let i = 0; i < line.words.length - 1; i++) {
+                        const gap = line.words[i+1].bbox.x0 - line.words[i].bbox.x1;
+                        if (gap > 40) largeGaps++; // 40px is a guestimate for a column gap
+                    }
+                    if (largeGaps >= 2) lineWithMultipleGaps++;
+                }
+            });
+
+            return lineWithMultipleGaps > lines.length * 0.4;
+        }
+
+        function formatAsTable(block) {
+            const table = document.createElement('table');
+            const tbody = document.createElement('tbody');
+            const lines = block.paragraphs.flatMap(p => p.lines);
+
+            // Sort lines by Y coordinate
+            lines.sort((a, b) => a.bbox.y0 - b.bbox.y0);
+
+            lines.forEach(line => {
+                const tr = document.createElement('tr');
+                
+                // Group words into cells based on proximity
+                let currentCellText = [];
+                for (let i = 0; i < line.words.length; i++) {
+                    const word = line.words[i];
+                    currentCellText.push(word.text);
+                    
+                    const nextWord = line.words[i+1];
+                    const isLastWord = i === line.words.length - 1;
+                    const hasGap = nextWord && (nextWord.bbox.x0 - word.bbox.x1 > 35);
+
+                    if (isLastWord || hasGap) {
+                        const td = document.createElement('td');
+                        td.textContent = currentCellText.join(' ');
+                        tr.appendChild(td);
+                        currentCellText = [];
+                    }
+                }
+                tbody.appendChild(tr);
+            });
+
+            table.appendChild(tbody);
+            return table;
+        }
+
+        function formatAsList(para) {
+            const ul = document.createElement('ul');
+            para.lines.forEach(line => {
+                const li = document.createElement('li');
+                // Remove the bullet character from the start
+                li.textContent = line.text.trim().replace(/^[\u2022\u00b7\*\-]\s|^\d+[\.\)]\s/, '');
+                ul.appendChild(li);
+            });
+            return ul;
+        }
+
+        // --- UI Interactions ---
+
+        function switchMode(mode) {
+            currentMode = mode;
+            const btnFormatted = document.getElementById('btn-formatted');
+            const btnRaw = document.getElementById('btn-raw');
+
+            if (mode === 'formatted') {
+                resultContainer.classList.remove('hidden');
+                rawContainer.classList.add('hidden');
+                btnFormatted.className = 'px-4 py-1.5 rounded-md bg-blue-600 text-white text-sm font-medium shadow-sm';
+                btnRaw.className = 'px-4 py-1.5 rounded-md bg-white border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-100';
+            } else {
+                resultContainer.classList.add('hidden');
+                rawContainer.classList.remove('hidden');
+                btnRaw.className = 'px-4 py-1.5 rounded-md bg-blue-600 text-white text-sm font-medium shadow-sm';
+                btnFormatted.className = 'px-4 py-1.5 rounded-md bg-white border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-100';
+            }
+        }
+
+        document.getElementById('btn-formatted').addEventListener('click', () => switchMode('formatted'));
+        document.getElementById('btn-raw').addEventListener('click', () => switchMode('raw'));
+
+        document.getElementById('copy-btn').addEventListener('click', () => {
+            const content = currentMode === 'formatted' ? resultContainer.innerText : rawContainer.value;
+            navigator.clipboard.writeText(content).then(() => {
+                const icon = document.querySelector('#copy-btn i');
+                icon.className = 'fas fa-check text-green-500';
+                setTimeout(() => icon.className = 'fas fa-copy', 2000);
+            });
+        });
+
+        document.getElementById('download-txt').addEventListener('click', () => {
+            const blob = new Blob([rawContainer.value], { type: 'text/plain' });
+            downloadBlob(blob, 'ocr-result.txt');
+        });
+
+        document.getElementById('download-html').addEventListener('click', () => {
+            const fullHtml = `
+                <html>
+                <head>
+                    <style>
+                        body { font-family: sans-serif; padding: 40px; line-height: 1.6; }
+                        table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+                        th, td { border: 1px solid #ccc; padding: 10px; text-align: left; }
+                        ul { margin-bottom: 20px; }
+                    </style>
+                </head>
+                <body>${resultContainer.innerHTML}</body>
+                </html>
+            `;
+            const blob = new Blob([fullHtml], { type: 'text/html' });
+            downloadBlob(blob, 'ocr-result.html');
+        });
+
+        function downloadBlob(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // Reload worker when language changes
+        langSelect.addEventListener('change', async () => {
+            if (worker) {
+                await worker.terminate();
+                worker = null;
+            }
+            showStatus('Language updated', 'fas fa-info-circle text-blue-500');
+            setTimeout(() => statusCard.classList.add('hidden'), 2000);
+        });
+
+    </script>
+</body>
+</html>
